@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"math"
 	"net/smtp"
@@ -39,42 +38,43 @@ type Summaries struct {
 	MonthlyTransactions map[string]int
 }
 
+type EmailSummary struct {
+	Total               float64
+	MonthlyTransactions map[string]int
+	CreditAverage       float64
+	DebitAverage        float64
+}
+
 type TransactionCSV struct {
 	ID          string
 	Date        string
 	Transaction string
 }
 
-func HandleRequest(ctx context.Context, ev events.S3Event) (string, error) {
-	out := ""
-	for _, record := range ev.Records {
-		s3 := record.S3
-		fmt.Printf("[%s - %s] Bucket = %s, Key = %s \n", record.EventSource, record.EventTime, s3.Bucket.Name, s3.Object.Key)
-		out += fmt.Sprintf("[%s - %s] Bucket = %s, Key = %s \n", record.EventSource, record.EventTime, s3.Bucket.Name, s3.Object.Key)
-	}
-
+func HandleRequest(ctx context.Context, ev events.S3Event) error {
 	file, err := getFile(ev)
 	if err != nil {
-		return "ERROR", err
+		return err
 	}
 
 	ts, err := readCSV(file)
 	if err != nil {
-		return "ERROR", err
+		return err
 	}
+
 	sums, err := getSummaries(ts)
 	if err != nil {
-		return "ERROR", err
+		return err
 	}
-	fmt.Printf("sums: %v\n", sums)
 
 	if err = sendEmail(sums); err != nil {
-		return "ERROR", err
+		return err
 	}
 
-	return out, nil
+	return nil
 }
 
+// getFile will retrieve the file referenced in the S3Event and return a pointer to a local copy of the file.
 func getFile(ev events.S3Event) (*os.File, error) {
 	sess, err := session.NewSession(&aws.Config{})
 	if err != nil {
@@ -82,11 +82,12 @@ func getFile(ev events.S3Event) (*os.File, error) {
 	}
 
 	// we're making some assumptions here, but for this code challenge purpose we should be fine.
-	// the s3 trigger filter ensures we're getting a file with path `csv/somefile.csv`
+	// The s3 trigger filter ensures we're getting a file with path `csv/somefile.csv`.
+	// And we know there's only 1 file in `ev.Records` because it's triggered by the addition of a single file.
 	name := strings.Split(ev.Records[0].S3.Object.Key, "/")[1]
-	file, err := os.Create(filepath.Join("/tmp", name))
 	// We should be creating a unique name of some kind instead of just using what's in the key
 	// because os.Create will truncate if the file at that path already exists
+	file, err := os.Create(filepath.Join("/tmp", name))
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +118,7 @@ func getMonth(s string) (string, error) {
 	return months[i], nil
 }
 
+// getSummaries processes our slice of structs into a single struct in
 func getSummaries(ts []TransactionCSV) (Summaries, error) {
 	sm := Summaries{}
 	monthTotals := make(map[string]int)
@@ -146,9 +148,12 @@ func getSummaries(ts []TransactionCSV) (Summaries, error) {
 	return sm, nil
 }
 
+// readCSV takes the content of `f` and puts it in a slice of easy
+// to operate on for applying to the email template.
 func readCSV(f *os.File) ([]TransactionCSV, error) {
 	r := csv.NewReader(f)
 
+	// skip the header
 	if _, err := r.Read(); err != nil {
 		return []TransactionCSV{}, err
 	}
@@ -160,12 +165,14 @@ func readCSV(f *os.File) ([]TransactionCSV, error) {
 
 	var ts []TransactionCSV
 	for _, r := range rows {
+		// we're trusting there's no blank values
 		ts = append(ts, TransactionCSV{ID: r[0], Date: r[1], Transaction: r[2]})
 	}
 
 	return ts, nil
 }
 
+// sendEmail uses `s` to send a formatted email from a template
 func sendEmail(s Summaries) error {
 	sess, err := session.NewSession(&aws.Config{})
 	if err != nil {
@@ -207,16 +214,13 @@ func sendEmail(s Summaries) error {
 
 	</html>
 `
+
+	// round the values out to hundreths
 	to := math.Round((s.CreditTotal+s.DebitTotal)*100) / 100
 	ca := math.Round(s.CreditTotal/float64(s.CreditCount)*100) / 100
 	da := math.Round(s.DebitTotal/float64(s.DebitCount)*100) / 100
 
-	data := struct {
-		Total               float64
-		MonthlyTransactions map[string]int
-		CreditAverage       float64
-		DebitAverage        float64
-	}{
+	data := EmailSummary{
 		Total:               to,
 		MonthlyTransactions: s.MonthlyTransactions,
 		CreditAverage:       ca,
