@@ -2,7 +2,7 @@
 
 This is an AWS Lambda function written in Go, deployed with AWS CloudFormation. It is triggered when a file is uploaded to its corresponding S3 bucket in the `csv/` directory. AWS Secrets Manager is used to store and access email credentials.
 
-Some assumptions are made about the data being properly formatted, so there isn't any input validation happening. It is expecting a cs in the following format, with no empty fields.
+Some assumptions are made about the data being properly formatted, so there isn't any input validation happening. It is expecting a csv in the following format, with no empty fields.
 
 | Id  | Date | Transaction |
 | --- | ---- | ----------- |
