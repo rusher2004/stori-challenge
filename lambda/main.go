@@ -130,17 +130,16 @@ func getSummaries(ts []TransactionCSV) (Summaries, error) {
 		monthTotals[month]++
 
 		amt, err := strconv.ParseFloat(t.Transaction, 64)
-		fl := amt
 		if err != nil {
 			return Summaries{}, err
 		}
 		if amt > 0 {
 			sm.CreditCount++
-			sm.CreditTotal += fl
+			sm.CreditTotal += amt
 		}
 		if amt < 0 {
 			sm.DebitCount++
-			sm.DebitTotal += fl
+			sm.DebitTotal += amt
 		}
 	}
 	sm.MonthlyTransactions = monthTotals
